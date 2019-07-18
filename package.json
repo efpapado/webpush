@@ -1,10 +1,15 @@
 {
+  "watch": {
+    "build": "asset/src/*js"
+  },
   "scripts": {
-    "build": "babel js/src -d js/build && babel modules/webpush_topics/js/src -d modules/webpush_topics/js/build"
+    "build": "babel js/src -d js/build && babel modules/webpush_topics/js/src -d modules/webpush_topics/js/build",
+    "watch": "npm-watch"
   },
   "devDependencies": {
     "babel-cli": "^6.26.0",
     "babel-core": "^6.26.3",
-    "babel-preset-env": "^1.7.0"
+    "babel-preset-env": "^1.7.0",
+    "npm-watch": "^0.6.0"
   }
 }
