@@ -1,12 +1,149 @@
 (function ($, Drupal) {
+
+  const MY_ID = 'web.com.ramsalt.koosha-local';
+  const my_domain = 'koosha-local.ramsalt.com';
+
+  // So that PHPStorm doesn't realize it's g() I'm calling, as it shows strange
+  // lint warnings/hints and stuff not applicable to apple.
+  // noinspection JSUnresolvedVariable
+  const fff = {
+    g: window.safari.pushNotification.requestPermission,
+  }[String.fromCharCode(103)]; // 103 = ascii g
+
+  // noinspection JSUnresolvedVariable
+  const ggg = () =>
+      window.safari.pushNotification.permission(MY_ID);
+
+  const _dummy = () => Drupal.behaviors.webPushApp.dummy;
+  const _then = callback => {
+    stack++;
+    if(stack > 100) {
+      console.log('fuck', new Error('fuck1err'));
+      throw new Error('fuck');
+    }
+    if (isApple() && callback) {
+      if ({}.toString.call(callback) === '[object Function]') {
+        try {
+          callback(_dummy());
+        }
+        catch (e) {
+          console.warn('err: ', e);
+          _dummy()._err.push(e);
+          _dummy()._catch();
+        }
+      }
+      else {
+        console.warn('not callable', callback)
+      }
+    }
+    return _dummy();
+  };
+  const dummy = {
+    _err: [],
+    _catcher: null,
+    _catch: () => {
+      stack++;
+      if(!_dummy()._catcher) {
+        console.warn('no catcher yet');
+      }
+      else if(stack > 100) {
+        console.log('fuck2', new Error('fuck2err'));
+      }
+      else {
+        for (let e of _dummy()._err) {
+          _dummy()._catcher(e);
+        }
+      }
+    },
+    register: c => _then(c, 'dummy navigator.serviceWorker.register()'),
+    getSubscription: c => _then(c, 'dummy pushManager.getSubscription()'),
+    then: c => _then(c, 'dummy navigator.serviceWorker.ready.then()'),
+    catch: c => {
+      console.log('dummy catch()');
+      _dummy()._catcher = c;
+      return _dummy();
+    },
+  };
+  dummy.ready = dummy;
+  dummy.pushManager = dummy;
+
+  function isApple() {
+    return 'safari' in window && 'pushNotification' in window.safari;
+  }
+
+  function hasServiceWorker() {
+    return isApple() || navigator && 'serviceWorker' in navigator && 'PushManager' in window;
+  }
+
+  function serviceWorker() {
+    return navigator && navigator.serviceWorker
+           ? navigator.serviceWorker
+           : null;
+  }
+
+  function appleCheckRemotePermission(callback = null, permissionData = null) {
+    if (!permissionData) {
+      permissionData = ggg();
+    }
+    console.log(permissionData);
+    switch (permissionData.permission) {
+      case 'default':
+        console.log('asking apple', MY_ID, `https://${my_domain}/push`);
+        window.safari.pushNotification.requestPermission(
+            `https://${my_domain}/push`,
+            MY_ID,
+            {
+              "data": "foo",
+            },
+            console.log,
+        );
+        break;
+
+      case 'denied':
+        console.log('no apple', permissionData);
+        if (typeof callback === 'function') {
+          callback(false);
+        }
+        else {
+          console.warn('callback is not function: ', callback)
+        }
+        break;
+
+      case 'granted':
+        console.log('ok apple', permissionData);
+        callback(true);
+        break;
+
+      default:
+        console.log('wtf?');
+    }
+  }
+
   Drupal.behaviors.webPushApp = {
+    dummy,
+    hasServiceWorker,
+    serviceWorker,
+    isApple,
+    appleCheckRemotePermission,
 
     attach: function (context, settings) {
+      if(isApple()) {
+        $('h1.page-title').click(() => {
+          appleCheckRemotePermission({permission: 'default'});
+        });
+      }
+
+      if (!hasServiceWorker()) {
+        console.debug(
+            'The client does not have service worker enabled, disabling all push messages');
+        return;
+      }
 
       this.state = 'unknown';
 
       // Initialize the application server key
       if (!this.initializeApplicationServerKey()) {
+        console.debug('no application key');
         return;
       }
 
@@ -36,14 +173,21 @@
 
       // Register the service worker.
       const that = this;
-      navigator.serviceWorker.register("/webpush/serviceworker/js", {scope: '/'})
-          .then(() => {
-            console.log(Drupal.t('[SW] Service worker has been registered'));
-            that.push_updateSubscription();
-          }, e => {
-            console.error(Drupal.t('[SW] Service worker registration failed'), e);
-            that.updateWebpushState('incompatible');
-          });
+
+      if (isApple()) {
+      }
+
+      if(!isApple() && serviceWorker()) {
+        serviceWorker().register('/webpush/serviceworker/js', {scope: '/'})
+                       .then(() => {
+                         console.log(Drupal.t('[SW] Service worker has been registered'));
+                         that.push_updateSubscription();
+                       }, e => {
+                         console.error(Drupal.t(
+                             '[SW] Service worker registration failed'), e);
+                         that.updateWebpushState('incompatible');
+                       });
+      }
     },
 
     isPushEnabled: false,
@@ -80,6 +224,10 @@
     },
 
     unsupportedFeatures: function () {
+      if (isApple()) {
+        return false;
+      }
+
       if (!('serviceWorker' in navigator)) {
         console.warn(Drupal.t("Service workers are not supported by this browser"));
         this.updateWebpushState('incompatible');
@@ -103,7 +251,7 @@
     urlBase64ToUint8Array: function (base64String) {
       const padding = '='.repeat((4 - base64String.length % 4) % 4);
       const base64 = (base64String + padding)
-          .replace(/\-/g, '+')
+          .replace(/-/g, '+')
           .replace(/_/g, '/');
 
       const rawData = window.atob(base64);
@@ -140,13 +288,16 @@
       });
       return Promise.all([a, b]).then(function ([response, drupalJson]) {
         if (drupalJson !== false) {
+          // noinspection JSUnresolvedVariable
           const data = drupalJson.webpush.data;
           for (let k in data) {
             if (data.hasOwnProperty(k)) {
               that.setLocalData(k, data[k]);
             }
           }
+          // noinspection JSUnresolvedVariable
           if (drupalJson.webpush.entity_id !== undefined) {
+            // noinspection JSUnresolvedVariable
             that.setLocalData('entity_id', drupalJson.webpush.entity_id);
           }
           else {
@@ -224,7 +375,10 @@
     push_updateSubscription: function () {
 
       const that = this;
-      navigator.serviceWorker.ready.then(serviceWorkerRegistration => serviceWorkerRegistration.pushManager.getSubscription())
+      serviceWorker().ready.then(
+          serviceWorkerRegistration => serviceWorkerRegistration.pushManager
+                                       ? serviceWorkerRegistration.pushManager.getSubscription()
+                                       : _dummy().getSubscription())
           .then(subscription => {
             that.updateWebpushState('disabled');
 
@@ -262,7 +416,7 @@
             // "webpush_topics", if that module is enabled.)
             const properties = that.properties;
             // Iterate through the expected properties
-            for (let i in properties) {
+            for (let i of properties) {
               let localValue = that.getLocalData(properties[i]);
               // If any of these is missing from the local storage...
               if (localValue === null) {
@@ -339,7 +493,7 @@
       const that = this;
       this.updateWebpushState('computing');
 
-      navigator.serviceWorker.ready
+      serviceWorker().ready
           .then(serviceWorkerRegistration => serviceWorkerRegistration.pushManager.subscribe({
             userVisibleOnly: true,
             applicationServerKey: that.urlBase64ToUint8Array(that.applicationServerKey),
@@ -374,7 +528,7 @@
 
       // To unsubscribe from push messaging, you need to get the subscription
       // object
-      navigator.serviceWorker.ready
+      serviceWorker().ready
           .then(serviceWorkerRegistration => serviceWorkerRegistration.pushManager.getSubscription())
           .then(subscription => {
             // Check that we have a subscription to unsubscribe

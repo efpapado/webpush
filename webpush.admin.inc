@@ -106,7 +106,7 @@ function webpush_admin_advanced_configuration_form() {
   $form['app_keys'] = [
     '#type' => 'fieldset',
     '#title' => t('App keys', [], ['context' => 'webpush']),
-    '#description' => t('You can use this site to create your app keys:', [], ['context' => 'webpush']) . ' <a href="https://web-push-codelab.glitch.me/">https://web-push-codelab.glitch.me</a>',
+    '#description' => t('You can use this site to create your app keys:', [], ['context' => 'webpush']) . ' <a target="_blank" href="https://web-push-codelab.glitch.me/">https://web-push-codelab.glitch.me</a>',
     '#collapsible' => FALSE,
   ];
   $form['app_keys']['webpush_public_key'] = [

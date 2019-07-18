@@ -28,7 +28,7 @@ function webpush_topics_block_info() {
  * Implements hook_block_view().
  */
 function webpush_topics_block_view($delta = '') {
-  if (!webpush_is_enabled() || !user_access('register webpush')) {
+  if (!user_access('register webpush')) {
     return [];
   }
 
@@ -177,7 +177,7 @@ function webpush_topics_webpush_return_subscription_data_alter(&$return_data, $e
  */
 function webpush_topics_form_webpush_admin_send_form_alter(&$form, &$form_state, $form_id) {
   if (!webpush_subscription__count()) {
-    return;
+    _webpush_setup_help('subscribers_count', TRUE);
   }
 
   $topics = _webpush_topics_get_topics($include_all = FALSE);
@@ -213,6 +213,12 @@ function webpush_topics_form_webpush_admin_send_form_alter(&$form, &$form_state,
 
 function webpush_topics_admin_send_form_validate(&$form, &$form_state) {
   $values = $form_state['values'];
+
+  if (!webpush_subscription__count()) {
+    $msg = _webpush_setup_help('subscribers_count', TRUE);
+    form_error($form['topics_wrapper']['topics_mode'], $msg);
+    return FALSE;
+  }
 
   $topics_mode = $values['topics_mode'];
   if ($topics_mode === 'select') {

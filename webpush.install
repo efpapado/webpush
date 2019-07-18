@@ -15,7 +15,7 @@ function webpush_requirements($phase) {
         '@composer_manager_url' => 'https://www.drupal.org/project/composer_manager',
       ],
         ['context' => 'webpush']),
-      'severity' => REQUIREMENT_ERROR,
+      'severity' => REQUIREMENT_WARNING,
     ];
   }
 

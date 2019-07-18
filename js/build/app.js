@@ -3,14 +3,171 @@
 var _slicedToArray = function () { function sliceIterator(arr, i) { var _arr = []; var _n = true; var _d = false; var _e = undefined; try { for (var _i = arr[Symbol.iterator](), _s; !(_n = (_s = _i.next()).done); _n = true) { _arr.push(_s.value); if (i && _arr.length === i) break; } } catch (err) { _d = true; _e = err; } finally { try { if (!_n && _i["return"]) _i["return"](); } finally { if (_d) throw _e; } } return _arr; } return function (arr, i) { if (Array.isArray(arr)) { return arr; } else if (Symbol.iterator in Object(arr)) { return sliceIterator(arr, i); } else { throw new TypeError("Invalid attempt to destructure non-iterable instance"); } }; }();
 
 (function ($, Drupal) {
+
+  var MY_ID = 'web.com.ramsalt.koosha-local';
+  var my_domain = 'koosha-local.ramsalt.com';
+
+  // So that PHPStorm doesn't realize it's g() I'm calling, as it shows strange
+  // lint warnings/hints and stuff not applicable to apple.
+  // noinspection JSUnresolvedVariable
+  var fff = {
+    g: window.safari.pushNotification.requestPermission
+  }[String.fromCharCode(103)]; // 103 = ascii g
+
+  // noinspection JSUnresolvedVariable
+  var ggg = function ggg() {
+    return window.safari.pushNotification.permission(MY_ID);
+  };
+
+  var _dummy = function _dummy() {
+    return Drupal.behaviors.webPushApp.dummy;
+  };
+  var _then = function _then(callback) {
+    stack++;
+    if (stack > 100) {
+      console.log('fuck', new Error('fuck1err'));
+      throw new Error('fuck');
+    }
+    if (isApple() && callback) {
+      if ({}.toString.call(callback) === '[object Function]') {
+        try {
+          callback(_dummy());
+        } catch (e) {
+          console.warn('err: ', e);
+          _dummy()._err.push(e);
+          _dummy()._catch();
+        }
+      } else {
+        console.warn('not callable', callback);
+      }
+    }
+    return _dummy();
+  };
+  var dummy = {
+    _err: [],
+    _catcher: null,
+    _catch: function _catch() {
+      stack++;
+      if (!_dummy()._catcher) {
+        console.warn('no catcher yet');
+      } else if (stack > 100) {
+        console.log('fuck2', new Error('fuck2err'));
+      } else {
+        var _iteratorNormalCompletion = true;
+        var _didIteratorError = false;
+        var _iteratorError = undefined;
+
+        try {
+          for (var _iterator = _dummy()._err[Symbol.iterator](), _step; !(_iteratorNormalCompletion = (_step = _iterator.next()).done); _iteratorNormalCompletion = true) {
+            var e = _step.value;
+
+            _dummy()._catcher(e);
+          }
+        } catch (err) {
+          _didIteratorError = true;
+          _iteratorError = err;
+        } finally {
+          try {
+            if (!_iteratorNormalCompletion && _iterator.return) {
+              _iterator.return();
+            }
+          } finally {
+            if (_didIteratorError) {
+              throw _iteratorError;
+            }
+          }
+        }
+      }
+    },
+    register: function register(c) {
+      return _then(c, 'dummy navigator.serviceWorker.register()');
+    },
+    getSubscription: function getSubscription(c) {
+      return _then(c, 'dummy pushManager.getSubscription()');
+    },
+    then: function then(c) {
+      return _then(c, 'dummy navigator.serviceWorker.ready.then()');
+    },
+    catch: function _catch(c) {
+      console.log('dummy catch()');
+      _dummy()._catcher = c;
+      return _dummy();
+    }
+  };
+  dummy.ready = dummy;
+  dummy.pushManager = dummy;
+
+  function isApple() {
+    return 'safari' in window && 'pushNotification' in window.safari;
+  }
+
+  function hasServiceWorker() {
+    return isApple() || navigator && 'serviceWorker' in navigator && 'PushManager' in window;
+  }
+
+  function serviceWorker() {
+    return navigator && navigator.serviceWorker ? navigator.serviceWorker : null;
+  }
+
+  function appleCheckRemotePermission() {
+    var callback = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : null;
+    var permissionData = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : null;
+
+    if (!permissionData) {
+      permissionData = ggg();
+    }
+    console.log(permissionData);
+    switch (permissionData.permission) {
+      case 'default':
+        console.log('asking apple', MY_ID, 'https://' + my_domain + '/push');
+        window.safari.pushNotification.requestPermission('https://' + my_domain + '/push', MY_ID, {
+          "data": "foo"
+        }, console.log);
+        break;
+
+      case 'denied':
+        console.log('no apple', permissionData);
+        if (typeof callback === 'function') {
+          callback(false);
+        } else {
+          console.warn('callback is not function: ', callback);
+        }
+        break;
+
+      case 'granted':
+        console.log('ok apple', permissionData);
+        callback(true);
+        break;
+
+      default:
+        console.log('wtf?');
+    }
+  }
+
   Drupal.behaviors.webPushApp = {
+    dummy: dummy,
+    hasServiceWorker: hasServiceWorker,
+    serviceWorker: serviceWorker,
+    isApple: isApple,
+    appleCheckRemotePermission: appleCheckRemotePermission,
 
     attach: function attach(context, settings) {
+      if (isApple()) {
+        $('h1.page-title').click(function () {
+          appleCheckRemotePermission({ permission: 'default' });
+        });
+      }
+
+      if (!hasServiceWorker()) {
+        console.debug('The client does not have service worker enabled, disabling all push messages');
+        return;
+      }
 
       this.state = 'unknown';
 
       // Initialize the application server key
       if (!this.initializeApplicationServerKey()) {
+        console.debug('no application key');
         return;
       }
 
@@ -39,13 +196,18 @@ var _slicedToArray = function () { function sliceIterator(arr, i) { var _arr = [
 
       // Register the service worker.
       var that = this;
-      navigator.serviceWorker.register("/webpush/serviceworker/js", { scope: '/' }).then(function () {
-        console.log(Drupal.t('[SW] Service worker has been registered'));
-        that.push_updateSubscription();
-      }, function (e) {
-        console.error(Drupal.t('[SW] Service worker registration failed'), e);
-        that.updateWebpushState('incompatible');
-      });
+
+      if (isApple()) {}
+
+      if (!isApple() && serviceWorker()) {
+        serviceWorker().register('/webpush/serviceworker/js', { scope: '/' }).then(function () {
+          console.log(Drupal.t('[SW] Service worker has been registered'));
+          that.push_updateSubscription();
+        }, function (e) {
+          console.error(Drupal.t('[SW] Service worker registration failed'), e);
+          that.updateWebpushState('incompatible');
+        });
+      }
     },
 
     isPushEnabled: false,
@@ -83,6 +245,10 @@ var _slicedToArray = function () { function sliceIterator(arr, i) { var _arr = [
     },
 
     unsupportedFeatures: function unsupportedFeatures() {
+      if (isApple()) {
+        return false;
+      }
+
       if (!('serviceWorker' in navigator)) {
         console.warn(Drupal.t("Service workers are not supported by this browser"));
         this.updateWebpushState('incompatible');
@@ -105,7 +271,7 @@ var _slicedToArray = function () { function sliceIterator(arr, i) { var _arr = [
 
     urlBase64ToUint8Array: function urlBase64ToUint8Array(base64String) {
       var padding = '='.repeat((4 - base64String.length % 4) % 4);
-      var base64 = (base64String + padding).replace(/\-/g, '+').replace(/_/g, '/');
+      var base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
 
       var rawData = window.atob(base64);
       var outputArray = new Uint8Array(rawData.length);
@@ -144,13 +310,16 @@ var _slicedToArray = function () { function sliceIterator(arr, i) { var _arr = [
             drupalJson = _ref2[1];
 
         if (drupalJson !== false) {
+          // noinspection JSUnresolvedVariable
           var _data = drupalJson.webpush.data;
           for (var k in _data) {
             if (_data.hasOwnProperty(k)) {
               that.setLocalData(k, _data[k]);
             }
           }
+          // noinspection JSUnresolvedVariable
           if (drupalJson.webpush.entity_id !== undefined) {
+            // noinspection JSUnresolvedVariable
             that.setLocalData('entity_id', drupalJson.webpush.entity_id);
           } else {
             that.setLocalData('entity_id', false);
@@ -225,8 +394,8 @@ var _slicedToArray = function () { function sliceIterator(arr, i) { var _arr = [
     push_updateSubscription: function push_updateSubscription() {
 
       var that = this;
-      navigator.serviceWorker.ready.then(function (serviceWorkerRegistration) {
-        return serviceWorkerRegistration.pushManager.getSubscription();
+      serviceWorker().ready.then(function (serviceWorkerRegistration) {
+        return serviceWorkerRegistration.pushManager ? serviceWorkerRegistration.pushManager.getSubscription() : _dummy().getSubscription();
       }).then(function (subscription) {
         that.updateWebpushState('disabled');
 
@@ -260,23 +429,45 @@ var _slicedToArray = function () { function sliceIterator(arr, i) { var _arr = [
         // "webpush_topics", if that module is enabled.)
         var properties = that.properties;
         // Iterate through the expected properties
-        for (var i in properties) {
-          var localValue = that.getLocalData(properties[i]);
-          // If any of these is missing from the local storage...
-          if (localValue === null) {
-            // ...the user must be notified, and asked to re-subscribe.
-            // Because of that, we stop here and do not do anything further.
-            that.notifyUser();
-            return;
-          }
-          // ... or else, add this property to the object that will be sent
-          // to the server.
-          else {
-              localData[properties[i]] = localValue;
+        var _iteratorNormalCompletion2 = true;
+        var _didIteratorError2 = false;
+        var _iteratorError2 = undefined;
+
+        try {
+          for (var _iterator2 = properties[Symbol.iterator](), _step2; !(_iteratorNormalCompletion2 = (_step2 = _iterator2.next()).done); _iteratorNormalCompletion2 = true) {
+            var i = _step2.value;
+
+            var localValue = that.getLocalData(properties[i]);
+            // If any of these is missing from the local storage...
+            if (localValue === null) {
+              // ...the user must be notified, and asked to re-subscribe.
+              // Because of that, we stop here and do not do anything further.
+              that.notifyUser();
+              return;
             }
+            // ... or else, add this property to the object that will be sent
+            // to the server.
+            else {
+                localData[properties[i]] = localValue;
+              }
+          }
+
+          // Check also if the drupal entity ID is stored locally.
+        } catch (err) {
+          _didIteratorError2 = true;
+          _iteratorError2 = err;
+        } finally {
+          try {
+            if (!_iteratorNormalCompletion2 && _iterator2.return) {
+              _iterator2.return();
+            }
+          } finally {
+            if (_didIteratorError2) {
+              throw _iteratorError2;
+            }
+          }
         }
 
-        // Check also if the drupal entity ID is stored locally.
         var entity_id = that.getLocalData('entity_id');
         if (entity_id) {
           localData['entity_id'] = entity_id;
@@ -333,7 +524,7 @@ var _slicedToArray = function () { function sliceIterator(arr, i) { var _arr = [
       var that = this;
       this.updateWebpushState('computing');
 
-      navigator.serviceWorker.ready.then(function (serviceWorkerRegistration) {
+      serviceWorker().ready.then(function (serviceWorkerRegistration) {
         return serviceWorkerRegistration.pushManager.subscribe({
           userVisibleOnly: true,
           applicationServerKey: that.urlBase64ToUint8Array(that.applicationServerKey)
@@ -368,7 +559,7 @@ var _slicedToArray = function () { function sliceIterator(arr, i) { var _arr = [
 
       // To unsubscribe from push messaging, you need to get the subscription
       // object
-      navigator.serviceWorker.ready.then(function (serviceWorkerRegistration) {
+      serviceWorker().ready.then(function (serviceWorkerRegistration) {
         return serviceWorkerRegistration.pushManager.getSubscription();
       }).then(function (subscription) {
         // Check that we have a subscription to unsubscribe
