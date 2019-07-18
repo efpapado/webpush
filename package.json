@@ -1,6 +1,6 @@
 {
   "watch": {
-    "build": "asset/src/*js"
+    "build": "js/src/*js"
   },
   "scripts": {
     "build": "babel js/src -d js/build && babel modules/webpush_topics/js/src -d modules/webpush_topics/js/build",
