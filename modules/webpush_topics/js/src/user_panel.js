@@ -1,6 +1,24 @@
+$ = jQuery;
 (function ($, Drupal) {
+
+  if($.fn.jquery === "1.4.4") {
+    console.error('jQuery too old');
+  }
+
+  function hasServiceWorker() {
+    return Drupal.behaviors.webPushApp.hasServiceWorker();
+  }
+  function serviceWorker() {
+    return Drupal.behaviors.webPushApp.serviceWorker();
+  }
+
   Drupal.behaviors.webPushUserPanel = {
     attach: function (context, settings) {
+
+      if (!hasServiceWorker()) {
+        console.debug('No service worker');
+        return;
+      }
 
       const that = this;
 
@@ -84,7 +102,7 @@
 
 
       // Precheck the checkboxes
-      navigator.serviceWorker.ready
+      serviceWorker().ready
           .then(serviceWorkerRegistration => serviceWorkerRegistration.pushManager.getSubscription())
           .then(subscription => {
             if (subscription) {
@@ -109,7 +127,6 @@
                   $checkboxAll.click();
                 }
               }
-              return;
             }
           });
     },

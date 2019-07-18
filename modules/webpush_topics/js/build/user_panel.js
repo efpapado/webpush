@@ -2,9 +2,27 @@
 
 function _toConsumableArray(arr) { if (Array.isArray(arr)) { for (var i = 0, arr2 = Array(arr.length); i < arr.length; i++) { arr2[i] = arr[i]; } return arr2; } else { return Array.from(arr); } }
 
+$ = jQuery;
 (function ($, Drupal) {
+
+  if ($.fn.jquery === "1.4.4") {
+    console.error('jQuery too old');
+  }
+
+  function hasServiceWorker() {
+    return Drupal.behaviors.webPushApp.hasServiceWorker();
+  }
+  function serviceWorker() {
+    return Drupal.behaviors.webPushApp.serviceWorker();
+  }
+
   Drupal.behaviors.webPushUserPanel = {
     attach: function attach(context, settings) {
+
+      if (!hasServiceWorker()) {
+        console.debug('No service worker');
+        return;
+      }
 
       var that = this;
 
@@ -90,7 +108,7 @@ function _toConsumableArray(arr) { if (Array.isArray(arr)) { for (var i = 0, arr
       });
 
       // Precheck the checkboxes
-      navigator.serviceWorker.ready.then(function (serviceWorkerRegistration) {
+      serviceWorker().ready.then(function (serviceWorkerRegistration) {
         return serviceWorkerRegistration.pushManager.getSubscription();
       }).then(function (subscription) {
         if (subscription) {
@@ -115,7 +133,6 @@ function _toConsumableArray(arr) { if (Array.isArray(arr)) { for (var i = 0, arr
                 $checkboxAll.click();
               }
           }
-          return;
         }
       });
     },
