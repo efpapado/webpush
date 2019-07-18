@@ -1,5 +1,9 @@
 <?php
 
+define('WEBPUSH_ERR__COUNT', 0b00000001);
+define('WEBPUSH_ERR__LIB', 0b00000010);
+define('WEBPUSH_ERR__SSL', 0b00000100);
+
 /**
  * Implements hook_menu().
  */
@@ -67,7 +71,9 @@ function webpush_menu() {
     'access arguments' => ['send push notifications'],
   ];
 
-
+  require_once 'apple.inc';
+  $items += _webpush_subscription_apple_menu();
+  
   // Dummy elements for the entities administration pages.
   $items['admin/structure/webpush-subscription/manage'] = [
     'title' => 'WebPush subscriptions',
@@ -79,6 +85,87 @@ function webpush_menu() {
   ];
 
   return $items;
+}
+
+/**
+ * All the help messages, accessible by $topic.
+ *
+ * @param int $topic
+ *   Which help string?
+ * @param bool $display_error
+ *   Should _this_ method also display a flash message?
+ * @param bool $watchdog_error
+ *   Should _this_ method also log to watchdog?
+ *
+ * @return string
+ */
+function _webpush_setup_help(string $topic, bool $display_error = FALSE, bool $watchdog_error = FALSE): string {
+  $msg = '';
+  $ctx = ['context' => 'webpush'];
+
+  switch ($topic) {
+    case 'subscribers_count':
+    case 'subscriber_count':
+      $topic = WEBPUSH_ERR__COUNT;
+      break;
+    case 'lib':
+      $topic = WEBPUSH_ERR__LIB;
+      break;
+    case 'ssl':
+      $topic = WEBPUSH_ERR__SSL;
+      break;
+    default:
+      $topic = 0;
+  }
+  if ($topic & WEBPUSH_ERR__COUNT) {
+    $msg .= "\n<br>";
+    $msg .= t('You need to have at least one registered subscription in order to send a push notification, but it seems that you have none.', [], $ctx);
+    $msg .= "\n<br>";
+  }
+  if ($topic & WEBPUSH_ERR__LIB) {
+    $msg .= "\n<br>";
+    $msg .= t("You did not properly set the module with it's required " .
+      'libraries. NO messages will be sent. Check the modules README.txt' .
+      ' for more information on how to set it up.');
+    $msg .= "\n<br>";
+  }
+  if ($topic & WEBPUSH_ERR__SSL) {
+    $msg .= "\n<br>";
+    $msg .= t('You are not running the site on SSL and it is not served from <b>localhost</b>, thus webpush will not work');
+    $msg .= "\n<br>";
+  }
+
+  if ($watchdog_error) {
+    watchdog('webpush', $msg, [], WATCHDOG_ERROR);
+    drupal_set_message($msg, 'error');
+  }
+
+  // Watchdog is fine, but to display the error to the user, they must be admin.
+  // If they are not, use a safe help string.
+  if (!user_access('administer webpush')) {
+    $msg = t('Push messages are not available at this time');
+  }
+  if ($display_error) {
+    drupal_set_message($msg, 'error');
+  }
+  return $msg;
+}
+
+/**
+ * Checks whether if all requirements are met or not.
+ *
+ * @return bool
+ */
+function _webpush_is_ok(): int {
+  $err = 0;
+  if (!class_exists('\Minishlink\WebPush\Subscription')) {
+    $err |= WEBPUSH_ERR__LIB;
+  }
+  if (((empty($_SERVER['HTTPS']) || $_SERVER['HTTPS'] === 'off') && $_SERVER['SERVER_PORT'] !== 443)
+    && $_SERVER['HTTP_HOST'] !== 'localhost') {
+    $err |= WEBPUSH_ERR__SSL;
+  }
+  return $err;
 }
 
 /**
@@ -96,11 +183,10 @@ function webpush_admin_send_form() {
   $form = [];
 
   if (!webpush_subscription__count()) {
-    return [
-      'no_subscriptions_message' => [
-        '#markup' => t('You need to have at least one registered subscription in order to send a push notification, but it seems that you have none.', [], ['context' => 'webpush']),
-      ],
-    ];
+    _webpush_setup_help('subscriber_count', TRUE);
+  }
+  if ($err = _webpush_is_ok()) {
+    _webpush_setup_help($err, TRUE, TRUE);
   }
 
   $form['title'] = [
@@ -186,6 +272,19 @@ function webpush_admin_send_form_validate(&$form, &$form_state) {
   global $base_url;
   $values = $form_state['values'];
 
+  $ok = TRUE;
+  if (!webpush_subscription__count()) {
+    form_error($form['link'], _webpush_setup_help('subscribers_count'));
+    $ok = FALSE;
+  }
+  if ($err = _webpush_is_ok()) {
+    form_error($form['link'], _webpush_setup_help($err));
+    $ok = FALSE;
+  }
+  if (!$ok) {
+    return FALSE;
+  }
+
   if ($values['link_type'] == 'node') {
     $title = $values['link_node'];
     if (empty($title)) {
@@ -242,11 +341,14 @@ function webpush_admin_send_form_validate(&$form, &$form_state) {
       form_error($form['link']['link_custom'], t('You can only add urls from the current domain (!url)', ['!url' => $base_url], ['context' => 'webpush']));
       return FALSE;
     }
-
   }
 }
 
 function webpush_admin_send_form_submit($form, &$form_state) {
+  if(_webpush_is_ok() || !webpush_subscription__count()) {
+    throw new RuntimeException('webpush form submit: invalid state');
+  }
+
   $values = $form_state['values'];
   $title = $values['title'];
   $body = $values['body'];
@@ -391,7 +493,7 @@ function webpush_is_enabled() {
  * Implements hook_preprocess_html().
  */
 function webpush_preprocess_html(&$variables) {
-  if (!webpush_is_enabled() || !user_access('register webpush')) {
+  if (!user_access('register webpush')) {
     return;
   }
 
@@ -443,7 +545,7 @@ function webpush_block_view($delta = '') {
 }
 
 function _webpush_block_build() {
-  if (!webpush_is_enabled() || !user_access('register webpush')) {
+  if (!user_access('register webpush')) {
     return [];
   }
 
@@ -497,6 +599,16 @@ function webpush_webpush_buttons_info() {
 
 
 function webpush_subscription_registration_callback() {
+  if($err = _webpush_is_ok()) {
+    _webpush_setup_help($err, FALSE, TRUE);
+    drupal_json_output(FALSE);
+    drupal_exit();
+  }
+  if (!webpush_is_enabled()) {
+    drupal_json_output(FALSE);
+    drupal_exit();
+  }
+
   $subscription_input = json_decode(file_get_contents('php://input'), TRUE);
   $subscription = $subscription_input ?
     Minishlink\WebPush\Subscription::create([
@@ -508,6 +620,12 @@ function webpush_subscription_registration_callback() {
     FALSE;
   $data = $subscription_input['data'] ?? FALSE;
 
+//  if(!($subscription instanceof \Minishlink\WebPush\Subscription)) {
+//    watchdog('webpush', 'webpush registration callback: invalid user request, could not decode json');
+//    drupal_json_output(FALSE);
+//    drupal_exit();
+//  }
+
   $entity = FALSE;
   switch ($_SERVER['REQUEST_METHOD']) {
     case 'POST':
@@ -516,7 +634,8 @@ function webpush_subscription_registration_callback() {
       break;
 
     case 'DELETE':
-      $entity = webpush_unregister($subscription);
+      webpush_unregister($subscription);
+      $entity = NULL;
       break;
 
     //    case 'GET':
@@ -530,7 +649,7 @@ function webpush_subscription_registration_callback() {
   }
 
   if (is_object($entity)) {
-    list($id, $vid, $bundle) = entity_extract_ids('webpush_subscription', $entity);
+    list($id,) = entity_extract_ids('webpush_subscription', $entity);
 
     $return_data = [];
     // Give an opportunity to other modules to alter the outgoing data before we
@@ -549,7 +668,6 @@ function webpush_subscription_registration_callback() {
     drupal_json_output(FALSE);
     drupal_exit();
   }
-  return;
 }
 
 /**
@@ -561,10 +679,9 @@ function webpush_subscription_registration_callback() {
  *
  */
 function webpush_register(Minishlink\WebPush\Subscription $subscription, $data = FALSE) {
-
   if ($data && !empty($data['entity_id'])) {
     $incoming_entity_id = $data['entity_id'];
-    $entity = entity_load_single('webpush_subscription', [$incoming_entity_id]);
+    $entity = entity_load_single('webpush_subscription', $incoming_entity_id);
     unset($data['entity_id']);
   }
   else {
@@ -712,7 +829,7 @@ function webpush_register__retrieve_entity(Minishlink\WebPush\Subscription $subs
   if (isset($result['webpush_subscription'])) {
     reset($result['webpush_subscription']);
     $id = key($result['webpush_subscription']);
-    $entity = entity_load_single('webpush_subscription', [$id]);
+    $entity = entity_load_single('webpush_subscription', $id);
     return $entity;
   }
   return FALSE;
@@ -832,9 +949,16 @@ function webpush__send_notification_batch_wrapper($subscription_id, $data, &$con
 
   $wrapper = entity_metadata_wrapper('webpush_subscription', $subscription_id);
 
-  /** @var Minishlink\WebPush\Subscription $subscription */
-  $subscription = unserialize($wrapper->subscription->value());
-  $sent = webpush__send_notification($subscription, $title, $body, $link);
+  $err = _webpush_is_ok();
+  if(!$err) {
+    /** @var Minishlink\WebPush\Subscription $subscription */
+    $subscription = unserialize($wrapper->subscription->value());
+    $sent = webpush__send_notification($subscription, $title, $body, $link);
+  }
+  else {
+    _webpush_setup_help($err, FALSE, TRUE);
+    $sent = FALSE;
+  }
   if ($sent) {
     if (!isset($context['results']['webpush_success'])) {
       $context['results']['webpush_success'] = 1;
